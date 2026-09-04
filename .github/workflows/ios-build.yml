@@ -1,4 +1,4 @@
-﻿name: iOS Build IPA
+name: iOS Build IPA
 
 on:
   push:
@@ -27,9 +27,6 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
     
-    - name: Generate iOS platform files
-      run: flutter create . --platforms=ios --org com.personal
-    
     - name: Build iOS (unsigned release)
       run: flutter build ios --release --no-codesign
     
@@ -48,4 +45,3 @@ jobs:
         name: personal-ledger-ios-ipa
         path: personal-ledger-ios.ipa
         retention-days: 30
-
