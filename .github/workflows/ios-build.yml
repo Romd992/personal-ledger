@@ -48,3 +48,4 @@ jobs:
         name: personal-ledger-ios-ipa
         path: personal-ledger-ios.ipa
         retention-days: 30
+
