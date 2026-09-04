@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动屏金色背景，与 Flutter 启动页主题色一致，消除启动白屏 -->
+    <color name="splash_gold">#B8860B</color>
+    <color name="splash_gold_dark">#8B6914</color>
+</resources>
