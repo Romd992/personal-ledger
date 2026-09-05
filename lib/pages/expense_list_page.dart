@@ -5,6 +5,8 @@ import '../models/expense.dart';
 import '../providers/data_providers.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/amount_utils.dart';
+import '../providers/settings_providers.dart';
 import 'expense_form_page.dart';
 
 class ExpenseListPage extends ConsumerStatefulWidget {
@@ -273,24 +275,34 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
         unpaid += e.amount;
       }
     }
+    final amountMode = ref.watch(amountDisplayModeProvider);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: AppTheme.expenseRed.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppTheme.expenseRed.withOpacity(0.2))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-        _summaryItem('总支出', '¥${total.toStringAsFixed(2)}', AppTheme.expenseRed),
-        _summaryItem('已付', '¥${paid.toStringAsFixed(2)}', AppTheme.incomeGreen),
-        _summaryItem('未付', '¥${unpaid.toStringAsFixed(2)}', AppTheme.expenseRed),
-        _summaryItem('进项税', '¥${tax.toStringAsFixed(2)}', AppTheme.primaryGold),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: AppTheme.expenseRed.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.expenseRed.withOpacity(0.2))),
+      child: Column(children: [
+        Row(children: [
+          Expanded(child: _summaryItem('总支出', total, AppTheme.expenseRed, amountMode)),
+          Expanded(child: _summaryItem('已付', paid, AppTheme.incomeGreen, amountMode)),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: _summaryItem('未付', unpaid, AppTheme.expenseRed, amountMode)),
+          Expanded(child: _summaryItem('进项税', tax, AppTheme.primaryGold, amountMode)),
+        ]),
       ]),
     );
   }
 
-  Widget _summaryItem(String label, String value, Color color) {
-    return Column(children: [
-      Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
-      Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
-    ]);
+  Widget _summaryItem(String label, double value, Color color, String mode) {
+    return GestureDetector(
+      onTap: () => AmountUtils.showFullAmountDialog(context, label, value),
+      child: Column(children: [
+        Text('¥${AmountUtils.format(value, mode)}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color), maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+      ]),
+    );
   }
 
   Widget _buildEmpty() {

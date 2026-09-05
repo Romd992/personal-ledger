@@ -9,6 +9,7 @@ import '../models/book.dart';
 import 'calendar_page.dart';
 import 'settings_page.dart';
 import 'book_manage_page.dart';
+import '../utils/amount_utils.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -21,6 +22,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   String _timeRange = '本月'; // 本月/本年/全部
   bool _hideAmount = false;
   bool _isDark = false;
+  String _amountMode = 'smart';
   // 数据加载版本号：连续增删改会并发触发多次 _loadData，只允许最后一次结果落盘，避免旧结果覆盖新数据
   int _loadToken = 0;
   Map<String, double> _incomeStats = {};
@@ -115,17 +117,18 @@ class _HomePageState extends ConsumerState<HomePage> {
     return '¥${_group2(v.toStringAsFixed(2))}';
   }
 
-  String _fmtShort(double? v) {
+  String _fmtShort(double? v, [String mode = 'smart']) {
     if (v == null) return '0.00';
     if (_hideAmount) return '**';
-    // 完整金额显示：千分位分隔 + 两位小数，不做"万/亿"缩写
-    return _group2(v.toStringAsFixed(2));
+    return AmountUtils.format(v, mode);
   }
 
   @override
   Widget build(BuildContext context) {
     final hideAmount = ref.watch(amountPrivacyProvider);
     _hideAmount = hideAmount; // 同步全局状态到实例变量
+    final amountMode = ref.watch(amountDisplayModeProvider);
+    _amountMode = amountMode;
     _isDark = ref.watch(darkModeProvider); // 同步深色模式，用于卡片底色适配
     final currentBookId = ref.watch(currentBookIdProvider);
     final currentBook = _books.firstWhere((b) => b.id == currentBookId, orElse: () => Book(name: '默认账本', createdAt: ''));
@@ -333,13 +336,17 @@ class _HomePageState extends ConsumerState<HomePage> {
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, childAspectRatio: 1.1, crossAxisSpacing: 8, mainAxisSpacing: 8),
         itemBuilder: (context, index) {
           final c = cards[index];
-          return Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: _isDark ? AppTheme.darkCard : Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(_isDark ? 0.25 : 0.05), blurRadius: 4, offset: const Offset(0, 2))]),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Row(children: [Icon(c['icon'] as IconData, size: 16, color: c['color'] as Color), const SizedBox(width: 4), Text(c['label'] as String, style: TextStyle(fontSize: 11, color: _isDark ? AppTheme.darkText : AppTheme.textSecondary))]),
-              Text(_fmtShort((c['value'] as num).toDouble()), style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: c['color'] as Color), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ]),
+          final value = (c['value'] as num).toDouble();
+          return GestureDetector(
+            onTap: () => AmountUtils.showFullAmountDialog(context, c['label'] as String, value),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: _isDark ? AppTheme.darkCard : Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(_isDark ? 0.25 : 0.05), blurRadius: 4, offset: const Offset(0, 2))]),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Row(children: [Icon(c['icon'] as IconData, size: 16, color: c['color'] as Color), const SizedBox(width: 4), Expanded(child: Text(c['label'] as String, style: TextStyle(fontSize: 11, color: _isDark ? AppTheme.darkText : AppTheme.textSecondary), overflow: TextOverflow.ellipsis))]),
+                Text(_fmtShort(value, _amountMode), style: TextStyle(fontSize: _amountMode == 'full' ? 13 : 15, fontWeight: FontWeight.bold, color: c['color'] as Color), maxLines: 2, overflow: TextOverflow.ellipsis),
+              ]),
+            ),
           );
         },
       ),
@@ -354,11 +361,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(children: [
-        Expanded(child: _statusCard('已收款', _fmtShort(paid), AppTheme.incomeGreen, Icons.check_circle)),
+        Expanded(child: GestureDetector(onTap: () => AmountUtils.showFullAmountDialog(context, '已收款', paid), child: _statusCard('已收款', _fmtShort(paid, _amountMode), AppTheme.incomeGreen, Icons.check_circle))),
         const SizedBox(width: 8),
-        Expanded(child: _statusCard('未收款', _fmtShort(unpaid), AppTheme.warningOrange, Icons.pending)),
+        Expanded(child: GestureDetector(onTap: () => AmountUtils.showFullAmountDialog(context, '未收款', unpaid), child: _statusCard('未收款', _fmtShort(unpaid, _amountMode), AppTheme.warningOrange, Icons.pending))),
         const SizedBox(width: 8),
-        Expanded(child: _statusCard('未付款', _fmtShort(unpaidExpense), AppTheme.expenseRed, Icons.error_outline)),
+        Expanded(child: GestureDetector(onTap: () => AmountUtils.showFullAmountDialog(context, '未付款', unpaidExpense), child: _statusCard('未付款', _fmtShort(unpaidExpense, _amountMode), AppTheme.expenseRed, Icons.error_outline))),
       ]),
     );
   }

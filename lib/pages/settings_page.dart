@@ -35,6 +35,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final autoBackup = ref.watch(autoBackupProvider);
     final backupLimit = ref.watch(backupLimitProvider);
     final amountPrivacy = ref.watch(amountPrivacyProvider);
+    final amountMode = ref.watch(amountDisplayModeProvider);
     final taxpayerType = ref.watch(taxpayerTypeProvider);
     final generalRate = ref.watch(generalTaxRateProvider);
     final specialRate = ref.watch(specialTaxRateProvider);
@@ -67,6 +68,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             subtitle: '首页金额显示为 ****',
             value: amountPrivacy,
             onChanged: (v) => ref.read(amountPrivacyProvider.notifier).toggle(),
+          ),
+          _buildListTile(
+            icon: Icons.monetization_on,
+            title: '金额显示模式',
+            subtitle: amountMode == 'smart' ? '智能缩写（15.16万亿）' : '完整显示（15,159,301,570,413.00）',
+            onTap: () => _showAmountModeDialog(context, ref, amountMode),
           ),
           _buildSwitchTile(
             icon: Icons.backup,
@@ -645,6 +652,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       case -1: return '已关闭自动备份';
       default: return '每$days天备份一次';
     }
+  }
+
+  /// 显示金额显示模式选择对话框
+  void _showAmountModeDialog(BuildContext context, WidgetRef ref, String currentMode) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('金额显示模式'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          RadioListTile<String>(
+            title: const Text('智能缩写'),
+            subtitle: const Text('大额自动缩写：15.16万亿 / 151.59亿 / 8.88万'),
+            value: 'smart',
+            groupValue: currentMode,
+            onChanged: (v) {
+              ref.read(amountDisplayModeProvider.notifier).setMode(v!);
+              Navigator.pop(context);
+            },
+          ),
+          RadioListTile<String>(
+            title: const Text('完整显示'),
+            subtitle: const Text('始终显示完整千分位金额：15,159,301,570,413.00'),
+            value: 'full',
+            groupValue: currentMode,
+            onChanged: (v) {
+              ref.read(amountDisplayModeProvider.notifier).setMode(v!);
+              Navigator.pop(context);
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text('提示：点击任意金额数字可查看完整金额', style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        ],
+      ),
+    );
   }
 
   /// 显示备份频率选择对话框

@@ -155,6 +155,28 @@ class AmountPrivacyNotifier extends StateNotifier<bool> {
   }
 }
 
+// 金额显示模式：smart=智能缩写，full=完整显示
+final amountDisplayModeProvider = StateNotifierProvider<AmountDisplayModeNotifier, String>((ref) {
+  return AmountDisplayModeNotifier();
+});
+
+class AmountDisplayModeNotifier extends StateNotifier<String> {
+  AmountDisplayModeNotifier() : super('smart') {
+    _loadMode();
+  }
+
+  Future<void> _loadMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getString('amount_display_mode') ?? 'smart';
+  }
+
+  Future<void> setMode(String mode) async {
+    state = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('amount_display_mode', mode);
+  }
+}
+
 // 纳税人身份
 final taxpayerTypeProvider = StateNotifierProvider<TaxpayerTypeNotifier, String>((ref) {
   return TaxpayerTypeNotifier();
