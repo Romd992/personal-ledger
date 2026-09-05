@@ -97,22 +97,29 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  String _fmt(double? v) {
-    if (v == null) return '¥0.00';
-    if (_hideAmount) return '******';
-    return '¥${v.toStringAsFixed(2)}';
-  }
-
-  String _fmtShort(double? v) {
-    if (v == null) return '0';
-    if (_hideAmount) return '**';
-    // 完整金额显示，千分位分隔，不做"万/亿"缩写
-    final intPart = v.truncate().toString();
-    final formatted = intPart.replaceAllMapped(
+  // 千分位 + 两位小数（不做万/亿缩写），供首页金额统一调用
+  static String _group2(String fixed) {
+    final neg = fixed.startsWith('-');
+    final abs = neg ? fixed.substring(1) : fixed;
+    final parts = abs.split('.');
+    final intPart = parts[0].replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
       (Match m) => '${m[1]},',
     );
-    return formatted;
+    return '${neg ? '-' : ''}$intPart.${parts.length > 1 ? parts[1] : '00'}';
+  }
+
+  String _fmt(double? v) {
+    if (v == null) return '¥0.00';
+    if (_hideAmount) return '******';
+    return '¥${_group2(v.toStringAsFixed(2))}';
+  }
+
+  String _fmtShort(double? v) {
+    if (v == null) return '0.00';
+    if (_hideAmount) return '**';
+    // 完整金额显示：千分位分隔 + 两位小数，不做"万/亿"缩写
+    return _group2(v.toStringAsFixed(2));
   }
 
   @override
@@ -299,7 +306,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     final totalCost = _incomeStats['totalCost'] ?? 0;
     final totalExpense = _expenseStats['totalAmount'] ?? 0;
     final grossProfit = _incomeStats['totalGrossProfit'] ?? 0;
-    final netProfit = grossProfit - totalExpense;
+    // 纯利润与收入侧价税分离口径保持一致：一般纳税人专票进项税可抵扣、不重复计入费用；
+    // 小规模纳税人进项不可抵扣，支出全额计入费用。
+    final taxpayerType = ref.watch(taxpayerTypeProvider);
+    final deductibleTax = taxpayerType == 'small'
+        ? 0.0
+        : (_expenseStats['deductibleTax'] ?? 0);
+    final netProfit = grossProfit - (totalExpense - deductibleTax);
     final netCash = (_incomeStats['paidAmount'] ?? 0) - (_expenseStats['paidAmount'] ?? 0);
 
     final cards = [
@@ -392,7 +405,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         final income = (_monthlyTrend[group.x]['income'] as num).toDouble();
                         final expense = (_monthlyTrend[group.x]['expense'] as num).toDouble();
                         return BarTooltipItem(
-                          '$month\n收入:¥${income.toStringAsFixed(0)}\n支出:¥${expense.toStringAsFixed(0)}',
+                          '$month\n收入:¥${_group2(income.toStringAsFixed(2))}\n支出:¥${_group2(expense.toStringAsFixed(2))}',
                           const TextStyle(color: Colors.white, fontSize: 11),
                         );
                       },

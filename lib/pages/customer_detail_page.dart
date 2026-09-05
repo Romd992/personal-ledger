@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../models/customer.dart';
 import '../models/income.dart';
 import '../services/database_service.dart';
+import '../services/pdf_export_service.dart';
 import 'income_form_page.dart';
 
 class CustomerDetailPage extends StatefulWidget {
@@ -166,6 +167,101 @@ class _CustomerDetailPageState extends State<CustomerDetailPage> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该客户暂无交易记录，无法导出对账单')));
       return;
     }
+
+    // 让用户选择导出格式
+    final format = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择导出格式'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              title: const Text('PDF格式'),
+              subtitle: const Text('适合打印、发送给客户'),
+              onTap: () => Navigator.pop(ctx, 'pdf'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.table_chart, color: Colors.green),
+              title: const Text('Excel格式'),
+              subtitle: const Text('适合数据分析、二次编辑'),
+              onTap: () => Navigator.pop(ctx, 'excel'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+
+    if (format == null) return;
+
+    if (format == 'pdf') {
+      await _exportPdfStatement();
+    } else {
+      await _exportExcelStatement();
+    }
+  }
+
+  /// 导出PDF对账单
+  Future<void> _exportPdfStatement() async {
+    try {
+      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+      // 转换交易记录为Map格式
+      final transactions = _incomes.map((inc) => {
+        'date': inc.date,
+        'productName': inc.productName,
+        'amount': inc.amount,
+        'cost': inc.cost,
+        'invoiceType': inc.invoiceType,
+        'taxRate': inc.taxRate,
+        'taxAmount': inc.taxAmount,
+        'amountExcludingTax': inc.amountExcludingTax,
+        'grossProfit': inc.grossProfit,
+        'paymentStatus': inc.paymentStatus,
+        'paymentDate': inc.paymentDate,
+        'remark': inc.remark,
+      }).toList();
+
+      // 计算日期范围
+      DateTime startDate = DateTime.now();
+      DateTime endDate = DateTime.now();
+      if (_incomes.isNotEmpty) {
+        final dates = _incomes.map((i) => DateTime.parse(i.date)).toList();
+        dates.sort();
+        startDate = dates.first;
+        endDate = dates.last;
+      }
+
+      final path = await PdfExportService.exportCustomerStatement(
+        customerName: widget.customer.name,
+        startDate: startDate,
+        endDate: endDate,
+        transactions: transactions,
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        await Share.shareXFiles([XFile(path)], text: '${widget.customer.name}对账单.pdf');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF对账单已导出：$path')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出PDF失败：$e')),
+        );
+      }
+    }
+  }
+
+  /// 导出Excel对账单（原方法）
+  Future<void> _exportExcelStatement() async {
     try {
       final excel = Excel.createExcel();
       excel.delete('Sheet1');

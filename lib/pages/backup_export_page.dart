@@ -5,11 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:excel/excel.dart';
 import '../theme/app_theme.dart';
 import '../services/database_service.dart';
+import '../services/platform_file_service.dart';
 import '../providers/data_providers.dart';
 import 'wifi_transfer_page.dart';
+import 'import_backup_page.dart';
 
 class BackupExportPage extends ConsumerStatefulWidget {
   const BackupExportPage({super.key});
@@ -28,12 +31,26 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
     try {
       final data = await DatabaseService.instance.exportAllData();
       final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
-      final dir = await getTemporaryDirectory();
       final fileName = '记账备份_${DateTime.now().toString().substring(0, 10).replaceAll('-', '')}_${DateTime.now().millisecondsSinceEpoch}.json';
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsString(jsonStr);
-      await Share.shareXFiles([XFile(file.path, name: fileName)], text: '个人记账数据备份');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('备份文件已生成，请选择保存位置')));
+
+      // 使用平台适配服务保存文件
+      final savedPath = await PlatformFileService.saveFile(
+        fileName: fileName,
+        bytes: utf8.encode(jsonStr),
+        dialogTitle: '导出数据备份',
+      );
+
+      if (mounted) {
+        if (savedPath != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('备份已保存到：$savedPath')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('备份文件已生成，请选择保存位置')),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'), backgroundColor: AppTheme.expenseRed));
     } finally {
@@ -41,45 +58,14 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
     }
   }
 
-  // 导入数据备份
+  // 导入数据备份（跳转到自动搜索页面）
   Future<void> _importBackup() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('导入备份'),
-        content: const Text('导入将覆盖当前所有数据，是否继续？\n\n建议先导出当前数据作为备份。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), style: TextButton.styleFrom(foregroundColor: AppTheme.expenseRed), child: const Text('确认导入')),
-        ],
-      ),
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ImportBackupPage()),
     );
-    if (confirm != true) return;
-
-    setState(() => _importing = true);
-    try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-      if (result == null || result.files.isEmpty) {
-        setState(() => _importing = false);
-        return;
-      }
-      final file = File(result.files.first.path!);
-      final content = await file.readAsString();
-      final data = jsonDecode(content) as Map<String, dynamic>;
-      final count = await DatabaseService.instance.importAllData(data, clearExisting: true);
-      // 导入会整体覆盖数据库，通知所有缓存页面刷新，避免首页/列表/税务/统计仍显示旧数据
-      ref.invalidate(incomesProvider);
-      ref.invalidate(expensesProvider);
-      ref.invalidate(expenseTypesProvider);
-      ref.read(refreshTriggerProvider.notifier).state++;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导入成功，共导入 $count 条数据')));
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导入失败: $e'), backgroundColor: AppTheme.expenseRed));
-    } finally {
-      if (mounted) setState(() => _importing = false);
+    if (result == true && mounted) {
+      Navigator.pop(context);
     }
   }
 
@@ -166,6 +152,10 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
         styledRow(sheet, ['项目', '金额'], header: true);
         final incomeStats = await DatabaseService.instance.getIncomeStats();
         final expenseStats = await DatabaseService.instance.getExpenseStats();
+        // 净利润口径与首页/统计一致：一般纳税人专票进项税可抵扣、不重复计入费用
+        final prefs = await SharedPreferences.getInstance();
+        final isSmallTaxpayer = prefs.getString('taxpayer_type') == 'small';
+        final deductibleExpenseTax = isSmallTaxpayer ? 0.0 : (expenseStats['deductibleTax'] ?? 0);
         final summaryRows = <List<dynamic>>[
           ['收入总额(价税合计)', (incomeStats['totalAmount'] ?? 0).toStringAsFixed(2)],
           ['收入总额(不含税)', (incomeStats['totalExcludingTax'] ?? 0).toStringAsFixed(2)],
@@ -178,7 +168,7 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
           ['进项税额', (expenseStats['totalTax'] ?? 0).toStringAsFixed(2)],
           ['已付款', (expenseStats['paidAmount'] ?? 0).toStringAsFixed(2)],
           ['未付款', (expenseStats['unpaidAmount'] ?? 0).toStringAsFixed(2)],
-          ['净利润', ((incomeStats['totalGrossProfit'] ?? 0) - (expenseStats['totalAmount'] ?? 0)).toStringAsFixed(2)],
+          ['净利润', ((incomeStats['totalGrossProfit'] ?? 0) - ((expenseStats['totalAmount'] ?? 0) - deductibleExpenseTax)).toStringAsFixed(2)],
           ['应交增值税', ((incomeStats['totalTax'] ?? 0) - (expenseStats['totalTax'] ?? 0)).toStringAsFixed(2)],
         ];
         for (final row in summaryRows) {
@@ -187,14 +177,28 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
         applyWidths(sheet, [26, 18]);
       }
 
-      final dir = await getTemporaryDirectory();
       final typeName = type == 'income' ? '收入明细' : type == 'expense' ? '支出明细' : '全部数据';
       final fileName = '记账_${typeName}_${DateTime.now().toString().substring(0, 10).replaceAll('-', '')}.xlsx';
-      final file = File('${dir.path}/$fileName');
       final bytes = excel.encode();
-      await file.writeAsBytes(bytes!);
-      await Share.shareXFiles([XFile(file.path, name: fileName)], text: '个人记账$typeName导出');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Excel文件已生成，请选择保存位置')));
+
+      // 使用平台适配服务保存文件
+      final savedPath = await PlatformFileService.saveFile(
+        fileName: fileName,
+        bytes: bytes!,
+        dialogTitle: '导出$typeName Excel',
+      );
+
+      if (mounted) {
+        if (savedPath != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Excel已保存到：$savedPath')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Excel文件已生成，请选择保存位置')),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'), backgroundColor: AppTheme.expenseRed));
     } finally {
@@ -207,7 +211,7 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
     setState(() => _exporting = true);
     try {
       final dir = await getTemporaryDirectory();
-      final files = <XFile>[];
+      final generatedFiles = <Map<String, dynamic>>[];
       String csvEscape(String v) {
         if (v.contains(',') || v.contains('"') || v.contains('\n')) {
           return '"${v.replaceAll('"', '""')}"';
@@ -234,7 +238,7 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
         }
         final f = File('${dir.path}/收入明细_$dateTag.csv');
         await f.writeAsString(buf.toString());
-        files.add(XFile(f.path, name: '收入明细_$dateTag.csv'));
+        generatedFiles.add({'name': '收入明细_$dateTag.csv', 'path': f.path, 'bytes': await f.readAsBytes()});
       }
 
       if (type == 'expense' || type == 'all') {
@@ -252,12 +256,37 @@ class _BackupExportPageState extends ConsumerState<BackupExportPage> {
         }
         final f = File('${dir.path}/支出明细_$dateTag.csv');
         await f.writeAsString(buf.toString());
-        files.add(XFile(f.path, name: '支出明细_$dateTag.csv'));
+        generatedFiles.add({'name': '支出明细_$dateTag.csv', 'path': f.path, 'bytes': await f.readAsBytes()});
       }
 
       final typeName = type == 'income' ? '收入明细' : type == 'expense' ? '支出明细' : '全部数据';
-      await Share.shareXFiles(files, text: '个人记账$typeName CSV导出');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('CSV文件已生成，请选择保存位置')));
+
+      if (PlatformFileService.isWindows) {
+        // Windows: 分别保存每个文件
+        final savedPaths = <String>[];
+        for (final f in generatedFiles) {
+          final saved = await PlatformFileService.saveFile(
+            fileName: f['name'] as String,
+            bytes: f['bytes'] as List<int>,
+            dialogTitle: '导出${f['name']}',
+          );
+          if (saved != null) savedPaths.add(saved);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已保存${savedPaths.length}个CSV文件')),
+          );
+        }
+      } else {
+        // Android: 用系统分享
+        final xFiles = generatedFiles.map((f) => XFile(f['path'] as String, name: f['name'] as String)).toList();
+        await Share.shareXFiles(xFiles, text: '简帐$typeName CSV导出');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CSV文件已生成，请选择保存位置')),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出失败: $e'), backgroundColor: AppTheme.expenseRed));
     } finally {

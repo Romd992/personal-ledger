@@ -118,7 +118,17 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           IconButton(icon: const Icon(Icons.chevron_left, color: Colors.white), onPressed: _previousMonth),
-          Text('${_currentMonth.year}年${_currentMonth.month}月', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          GestureDetector(
+            onTap: _showYearPicker,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${_currentMonth.year}年${_currentMonth.month}月', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
+              ],
+            ),
+          ),
           IconButton(icon: const Icon(Icons.chevron_right, color: Colors.white), onPressed: _nextMonth),
         ]),
         const SizedBox(height: 4),
@@ -133,8 +143,65 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
+  /// 显示年份选择器
+  void _showYearPicker() {
+    final currentYear = _currentMonth.year;
+    final startYear = 2000;
+    final endYear = 2300;
+    final years = List<int>.generate(endYear - startYear + 1, (i) => startYear + i);
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        height: 300,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Text('选择年份', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4, childAspectRatio: 2),
+                itemCount: years.length,
+                itemBuilder: (_, i) {
+                  final year = years[i];
+                  final isSelected = year == currentYear;
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      setState(() => _currentMonth = DateTime(year, _currentMonth.month, 1));
+                      _loadMonthData();
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppTheme.primaryGold : Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '$year年',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? Colors.white : Colors.black,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _headerStat(String label, double value, Color color) {
-    return Column(children: [Text(label, style: TextStyle(fontSize: 11, color: color.withOpacity(0.8))), Text('¥${value.toStringAsFixed(0)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color))]);
+    return Column(children: [Text(label, style: TextStyle(fontSize: 11, color: color.withOpacity(0.8))), Text('¥${value.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color))]);
   }
 
   Widget _buildWeekdayHeader() {
@@ -223,7 +290,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   }
 
   Widget _dayStat(String label, double value, Color color) {
-    return Column(children: [Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textHint)), Text('¥${value.toStringAsFixed(0)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color))]);
+    return Column(children: [Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textHint)), Text('¥${value.toStringAsFixed(2)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color))]);
   }
 
   Widget _buildDayDetail() {

@@ -62,7 +62,7 @@ class _PermissionGuidePageState extends State<PermissionGuidePage> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        '个人记账软件',
+                        '简帐',
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
@@ -71,7 +71,7 @@ class _PermissionGuidePageState extends State<PermissionGuidePage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'v2.1.3',
+                        'v1.0.0',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.white70,

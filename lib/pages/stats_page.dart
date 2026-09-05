@@ -11,6 +11,7 @@ import '../services/database_service.dart';
 import '../models/income.dart';
 import '../models/expense.dart';
 import '../providers/data_providers.dart';
+import '../providers/settings_providers.dart';
 
 class StatsPage extends ConsumerStatefulWidget {
   const StatsPage({super.key});
@@ -54,6 +55,26 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
     } else if (_timeRange == '本年') {
       startDate = '${now.year}-01-01';
       endDate = '${now.year}-12-31';
+    } else if (_timeRange == '近7天') {
+      final start = now.subtract(const Duration(days: 6));
+      startDate = '${start.year}-${start.month.toString().padLeft(2,'0')}-${start.day.toString().padLeft(2,'0')}';
+      endDate = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
+    } else if (_timeRange == '近30天') {
+      final start = now.subtract(const Duration(days: 29));
+      startDate = '${start.year}-${start.month.toString().padLeft(2,'0')}-${start.day.toString().padLeft(2,'0')}';
+      endDate = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
+    } else if (_timeRange == '近90天') {
+      final start = now.subtract(const Duration(days: 89));
+      startDate = '${start.year}-${start.month.toString().padLeft(2,'0')}-${start.day.toString().padLeft(2,'0')}';
+      endDate = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
+    } else if (_timeRange.startsWith('自定义:')) {
+      // 自定义范围格式：自定义:2024-01-01~2024-12-31
+      final range = _timeRange.substring(3);
+      final parts = range.split('~');
+      if (parts.length == 2) {
+        startDate = parts[0];
+        endDate = parts[1];
+      }
     }
 
     final income = await DatabaseService.instance.getIncomeStats(startDate: startDate, endDate: endDate);
@@ -71,6 +92,30 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
         _expenses = expenses;
         _loading = false;
       });
+    }
+  }
+
+  /// 显示自定义日期范围选择器
+  Future<void> _showCustomDateRange() async {
+    final now = DateTime.now();
+    final result = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2300),
+      initialDateRange: DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+      helpText: '选择统计日期范围',
+      fieldStartHintText: '开始日期',
+      fieldEndHintText: '结束日期',
+    );
+
+    if (result != null) {
+      final startStr = '${result.start.year}-${result.start.month.toString().padLeft(2,'0')}-${result.start.day.toString().padLeft(2,'0')}';
+      final endStr = '${result.end.year}-${result.end.month.toString().padLeft(2,'0')}-${result.end.day.toString().padLeft(2,'0')}';
+      setState(() => _timeRange = '自定义:$startStr~$endStr');
+      _loadData(isRefresh: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已筛选：$startStr 至 $endStr')),
+      );
     }
   }
 
@@ -95,8 +140,23 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
           IconButton(icon: const Icon(Icons.image_outlined), tooltip: '导出当前图表为图片', onPressed: _exportChartImage),
           PopupMenuButton<String>(
             icon: const Icon(Icons.date_range),
-            onSelected: (v) { setState(() => _timeRange = v); _loadData(isRefresh: true); },
-            itemBuilder: (_) => const [PopupMenuItem(value: '本月', child: Text('本月')), PopupMenuItem(value: '本年', child: Text('本年')), PopupMenuItem(value: '全部', child: Text('全部'))],
+            onSelected: (v) async {
+              if (v == 'custom') {
+                await _showCustomDateRange();
+              } else {
+                setState(() => _timeRange = v);
+                _loadData(isRefresh: true);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: '本月', child: Text('本月')),
+              PopupMenuItem(value: '本年', child: Text('本年')),
+              PopupMenuItem(value: '全部', child: Text('全部')),
+              PopupMenuItem(value: '近7天', child: Text('近7天')),
+              PopupMenuItem(value: '近30天', child: Text('近30天')),
+              PopupMenuItem(value: '近90天', child: Text('近90天')),
+              PopupMenuItem(value: 'custom', child: Text('自定义日期范围...')),
+            ],
           ),
         ],
       ),
@@ -184,9 +244,9 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
         final balance = income - expense;
         return Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(children: [
           Expanded(child: Text('${m['month']}', style: const TextStyle(fontSize: 12))),
-          Expanded(child: Text('¥${income.toStringAsFixed(0)}', style: const TextStyle(fontSize: 12, color: AppTheme.incomeGreen), textAlign: TextAlign.right)),
-          Expanded(child: Text('¥${expense.toStringAsFixed(0)}', style: const TextStyle(fontSize: 12, color: AppTheme.expenseRed), textAlign: TextAlign.right)),
-          Expanded(child: Text('¥${balance.toStringAsFixed(0)}', style: TextStyle(fontSize: 12, color: balance >= 0 ? AppTheme.incomeGreen : AppTheme.expenseRed, fontWeight: FontWeight.w500), textAlign: TextAlign.right)),
+          Expanded(child: Text('¥${income.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: AppTheme.incomeGreen), textAlign: TextAlign.right)),
+          Expanded(child: Text('¥${expense.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: AppTheme.expenseRed), textAlign: TextAlign.right)),
+          Expanded(child: Text('¥${balance.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, color: balance >= 0 ? AppTheme.incomeGreen : AppTheme.expenseRed, fontWeight: FontWeight.w500), textAlign: TextAlign.right)),
         ]));
       }),
     ])));
@@ -197,7 +257,9 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
     final totalCost = _incomeStats['totalCost'] ?? 0;
     final totalExpense = _expenseStats['totalAmount'] ?? 0;
     final grossProfit = _incomeStats['totalGrossProfit'] ?? 0;
-    final netProfit = grossProfit - totalExpense;
+    // 与首页一致：一般纳税人专票进项税可抵扣、不重复计入费用；小规模不可抵扣
+    final deductible = ref.watch(taxpayerTypeProvider) == 'small' ? 0.0 : (_expenseStats['deductibleTax'] ?? 0);
+    final netProfit = grossProfit - (totalExpense - deductible);
     final incomeTax = _incomeStats['totalTax'] ?? 0;
     final expenseTax = _expenseStats['totalTax'] ?? 0;
 
@@ -225,7 +287,7 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
       {'label': '收入', 'value': (_incomeStats['totalExcludingTax'] ?? 0.0).toDouble(), 'color': AppTheme.incomeGreen},
       {'label': '成本', 'value': (_incomeStats['totalCost'] ?? 0.0).toDouble(), 'color': AppTheme.warningOrange},
       {'label': '支出', 'value': (_expenseStats['totalAmount'] ?? 0.0).toDouble(), 'color': AppTheme.expenseRed},
-      {'label': '净利', 'value': ((_incomeStats['totalGrossProfit'] ?? 0.0) - (_expenseStats['totalAmount'] ?? 0.0)).toDouble(), 'color': AppTheme.primaryGold},
+      {'label': '净利', 'value': ((_incomeStats['totalGrossProfit'] ?? 0.0) - ((_expenseStats['totalAmount'] ?? 0.0) - (ref.watch(taxpayerTypeProvider) == 'small' ? 0.0 : (_expenseStats['deductibleTax'] ?? 0.0)))).toDouble(), 'color': AppTheme.primaryGold},
     ];
     final rawMax = data.map((e) => (e['value'] as num).toDouble()).reduce((a, b) => a > b ? a : b);
     final maxV = rawMax <= 0 ? 1.0 : rawMax * 1.2;
@@ -335,7 +397,7 @@ class _StatsPageState extends ConsumerState<StatsPage> with SingleTickerProvider
       final fileName = '统计图表_${tabName}_$ts.png';
       final file = File('${tempDir.path}/$fileName');
       await file.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(file.path, name: fileName)], text: '个人记账-统计图表（$tabName）');
+      await Share.shareXFiles([XFile(file.path, name: fileName)], text: '简帐-统计图表（$tabName）');
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导出图片失败: $e'), backgroundColor: AppTheme.expenseRed));
     }

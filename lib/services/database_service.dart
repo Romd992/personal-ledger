@@ -25,7 +25,7 @@ class DatabaseService {
     final fullPath = path.join(dbPath, 'personal_ledger.db');
     return await openDatabase(
       fullPath,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -69,6 +69,16 @@ class DatabaseService {
         await db.execute('ALTER TABLE expenses ADD COLUMN book_id INTEGER DEFAULT 1');
       } catch (_) {}
     }
+    if (oldVersion < 3) {
+      // 给收入表添加凭证图片字段（JSON数组存储图片路径列表）
+      try {
+        await db.execute('ALTER TABLE incomes ADD COLUMN voucher_images TEXT');
+      } catch (_) {}
+      // 给支出表添加凭证图片字段
+      try {
+        await db.execute('ALTER TABLE expenses ADD COLUMN voucher_images TEXT');
+      } catch (_) {}
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -92,6 +102,7 @@ class DatabaseService {
         payment_date TEXT,
         remark TEXT,
         book_id INTEGER DEFAULT 1,
+        voucher_images TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
@@ -113,6 +124,7 @@ class DatabaseService {
         payment_date TEXT,
         remark TEXT,
         book_id INTEGER DEFAULT 1,
+        voucher_images TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
@@ -491,6 +503,7 @@ class DatabaseService {
       SELECT
         COALESCE(SUM(amount), 0) as total_amount,
         COALESCE(SUM(tax_amount), 0) as total_tax,
+        COALESCE(SUM(CASE WHEN invoice_type = 'special' THEN tax_amount ELSE 0 END), 0) as deductible_tax,
         COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN amount ELSE 0 END), 0) as paid_amount,
         COALESCE(SUM(CASE WHEN payment_status = 'unpaid' THEN amount ELSE 0 END), 0) as unpaid_amount
       FROM expenses WHERE $where
@@ -499,6 +512,8 @@ class DatabaseService {
     return {
       'totalAmount': (row['total_amount'] as num).toDouble(),
       'totalTax': (row['total_tax'] as num).toDouble(),
+      // 一般纳税人专票可抵扣进项税额（普票/小规模不可抵扣，不计入此项）
+      'deductibleTax': (row['deductible_tax'] as num).toDouble(),
       'paidAmount': (row['paid_amount'] as num).toDouble(),
       'unpaidAmount': (row['unpaid_amount'] as num).toDouble(),
     };

@@ -1,16 +1,22 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
 import '../theme/app_theme.dart';
 import '../providers/settings_providers.dart';
 import '../services/update_service.dart';
 import '../services/feedback_service.dart';
+import '../services/data_migration_service.dart';
+import '../services/platform_file_service.dart';
+import '../services/database_service.dart';
 import 'book_manage_page.dart';
 import 'recycle_bin_page.dart';
 import 'backup_export_page.dart';
+import 'import_backup_page.dart';
 import 'template_manage_page.dart';
 import 'wifi_transfer_page.dart';
+import 'bluetooth_transfer_page.dart';
 import 'expense_type_manage_page.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -65,9 +71,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           _buildSwitchTile(
             icon: Icons.backup,
             title: '自动备份',
-            subtitle: '每记一笔自动备份数据',
+            subtitle: autoBackup ? '已开启，按设定频率自动备份' : '已关闭',
             value: autoBackup,
             onChanged: (v) => ref.read(autoBackupProvider.notifier).toggleAutoBackup(),
+          ),
+          _buildListTile(
+            icon: Icons.schedule,
+            title: '自动备份频率',
+            subtitle: _getBackupFrequencyText(ref.watch(backupFrequencyProvider)),
+            onTap: () => _showBackupFrequencyDialog(context, ref),
+          ),
+          _buildListTile(
+            icon: Icons.folder_open,
+            title: '查看备份存储位置',
+            subtitle: '点击打开手机文件管理器中的备份文件夹',
+            onTap: () => _openBackupFolder(context),
           ),
           _buildListTile(
             icon: Icons.storage,
@@ -128,6 +146,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             subtitle: 'WiFi局域网直传数据',
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferPage())),
           ),
+          _buildListTile(
+            icon: Icons.bluetooth,
+            title: '蓝牙互传',
+            subtitle: '通过蓝牙传输加密备份文件',
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BluetoothTransferPage())),
+          ),
+          _buildListTile(
+            icon: Icons.swap_horiz,
+            title: '数据迁移助手',
+            subtitle: '一键打包全部数据，新设备一键恢复（.ledger加密）',
+            onTap: () => _showDataMigrationDialog(context),
+          ),
           const Divider(height: 1),
 
           // 记账设置
@@ -157,7 +187,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           _buildListTile(
             icon: Icons.info_outline,
             title: '关于本软件',
-            subtitle: '个人记账 v${UpdateService.currentVersionName}',
+            subtitle: '简帐 v${UpdateService.currentVersionName}',
             onTap: () => _showAboutDialog(context),
           ),
           ListTile(
@@ -581,9 +611,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         } else {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             const SnackBar(
-                              content: Text('提交失败，请检查网络连接后重试'),
+                              content: Text('提交失败，请检查网络后重试；若网络正常仍失败，说明反馈通道暂时维护中，请稍后再试'),
                               backgroundColor: Colors.red,
-                              duration: Duration(seconds: 3),
+                              duration: Duration(seconds: 4),
                             ),
                           );
                         }
@@ -604,18 +634,355 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
+  /// 获取备份频率文本
+  String _getBackupFrequencyText(int days) {
+    switch (days) {
+      case 0: return '每次记账后立即备份';
+      case 1: return '每1天备份一次';
+      case 3: return '每3天备份一次';
+      case 7: return '每7天备份一次';
+      case 30: return '每30天备份一次';
+      case -1: return '已关闭自动备份';
+      default: return '每$days天备份一次';
+    }
+  }
+
+  /// 显示备份频率选择对话框
+  void _showBackupFrequencyDialog(BuildContext context, WidgetRef ref) {
+    final current = ref.read(backupFrequencyProvider);
+    final options = [
+      {'value': 0, 'label': '每次记账后', 'desc': '每记一笔收入或支出后立即备份'},
+      {'value': 1, 'label': '每天', 'desc': '每天首次打开App时自动备份'},
+      {'value': 3, 'label': '每3天', 'desc': '每3天自动备份一次'},
+      {'value': 7, 'label': '每周', 'desc': '每7天自动备份一次'},
+      {'value': 30, 'label': '每月', 'desc': '每30天自动备份一次'},
+      {'value': -1, 'label': '关闭', 'desc': '不自动备份，仅手动备份'},
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('自动备份频率'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: options.map((opt) {
+              final value = opt['value'] as int;
+              final selected = current == value;
+              return ListTile(
+                title: Text(opt['label'] as String),
+                subtitle: Text(opt['desc'] as String, style: const TextStyle(fontSize: 11)),
+                trailing: selected ? const Icon(Icons.check_circle, color: AppTheme.primaryGold) : const Icon(Icons.radio_button_unchecked),
+                onTap: () {
+                  ref.read(backupFrequencyProvider.notifier).setFrequency(value);
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('备份频率已设置为：${opt['label']}')),
+                  );
+                },
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+  }
+
+  /// 打开备份文件夹
+  Future<void> _openBackupFolder(BuildContext context) async {
+    try {
+      // 使用统一的外部可见备份目录（文件管理器可直接访问）
+      final backupDirEntity = await PlatformFileService.getBackupDirectory();
+      final backupDir = backupDirEntity.path;
+
+      // 显示路径
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('备份存储位置'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('备份文件保存在以下位置：', style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: SelectableText(
+                  backupDir,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text('点击下方按钮可直接跳转到文件管理器中的备份文件夹。', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  // 使用平台适配服务打开文件夹
+                  await PlatformFileService.openFolder(backupDir);
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('无法自动打开，请手动复制路径到文件管理器查找')),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.folder_open),
+              label: const Text('打开备份文件夹'),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGold),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('获取备份路径失败：$e')),
+      );
+    }
+  }
+
+  /// 显示数据迁移对话框
+  void _showDataMigrationDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.swap_horiz, color: AppTheme.primaryGold),
+            SizedBox(width: 8),
+            Text('数据迁移助手'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Text('一键打包全部数据（记账记录、客户档案、支出类型、模板、设置、凭证图片），生成加密的.ledger备份文件。', style: TextStyle(fontSize: 12)),
+            SizedBox(height: 8),
+            Text('新设备安装后，导入此文件并输入密码即可完全恢复所有数据。', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showExportMigrationDialog(context);
+            },
+            icon: const Icon(Icons.file_upload),
+            label: const Text('导出备份'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGold),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ImportBackupPage()));
+            },
+            icon: const Icon(Icons.file_download),
+            label: const Text('导入备份'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 导出数据迁移备份
+  Future<void> _showExportMigrationDialog(BuildContext context) async {
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('导出加密备份'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('请设置加密密码（至少6位），导入时需要此密码。', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '加密密码 *', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: confirmController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '确认密码 *', border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          ElevatedButton(
+            onPressed: () async {
+              final pwd = passwordController.text;
+              final confirm = confirmController.text;
+              if (pwd.length < 6) {
+                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('密码至少6位')));
+                return;
+              }
+              if (pwd != confirm) {
+                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('两次密码不一致')));
+                return;
+              }
+
+              Navigator.pop(ctx);
+              // 显示加载
+              showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+              try {
+                final db = await DatabaseService.instance.database;
+                final path = await DataMigrationService.exportFullBackup(password: pwd, db: db);
+                if (context.mounted) {
+                  Navigator.pop(context); // 关闭加载
+                  // 读取文件内容
+                  final backupFile = File(path);
+                  final bytes = await backupFile.readAsBytes();
+                  final fileName = backupFile.uri.pathSegments.last;
+
+                  // 使用平台适配服务保存文件
+                  final savedPath = await PlatformFileService.saveFile(
+                    fileName: fileName,
+                    bytes: bytes,
+                    dialogTitle: '导出加密备份',
+                  );
+
+                  if (context.mounted) {
+                    if (savedPath != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('备份已保存到：$savedPath')),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('备份文件已生成，请选择保存位置')),
+                      );
+                    }
+                  }
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('导出失败：$e')),
+                  );
+                }
+              }
+            },
+            child: const Text('开始导出'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 导入数据迁移备份
+  Future<void> _showImportMigrationDialog(BuildContext context) async {
+    final passwordController = TextEditingController();
+
+    // 先选择文件
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['ledger'],
+      );
+      if (result == null || result.files.single.path == null) return;
+      final filePath = result.files.single.path!;
+
+      if (!context.mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('导入加密备份'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('文件：${filePath.split('/').last}', style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 8),
+              const Text('⚠️ 导入将覆盖当前所有数据，请确认已备份当前数据！', style: TextStyle(fontSize: 12, color: Colors.red)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '加密密码 *', border: OutlineInputBorder()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            ElevatedButton(
+              onPressed: () async {
+                final pwd = passwordController.text;
+                if (pwd.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('请输入密码')));
+                  return;
+                }
+
+                Navigator.pop(ctx);
+                showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+                try {
+                  final db = await DatabaseService.instance.database;
+                  final result = await DataMigrationService.importFullBackup(
+                    ledgerPath: filePath,
+                    password: pwd,
+                    db: db,
+                  );
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('导入成功！恢复了${result['tablesRestored']}张表，${result['rowsRestored']}条记录')),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('导入失败：$e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('确认导入'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('选择文件失败：$e')),
+      );
+    }
+  }
+
   void _showAboutDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('关于个人记账'),
+        title: const Text('关于简帐'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('版本：v${UpdateService.currentVersionName}'),
             const SizedBox(height: 8),
-            const Text('一款完全离线的个人记账软件'),
+            const Text('一款完全离线的简帐软件'),
             const SizedBox(height: 8),
             const Text('数据安全：所有数据仅存储在本机，不上传任何服务器'),
             const SizedBox(height: 8),

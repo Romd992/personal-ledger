@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'theme/app_theme.dart';
 import 'pages/home_page.dart';
 import 'pages/income_list_page.dart';
@@ -15,13 +17,20 @@ import 'pages/tax_center_page.dart';
 import 'pages/permission_guide_page.dart';
 import 'widgets/bottom_nav.dart';
 import 'providers/settings_providers.dart';
+import 'services/update_service.dart';
+import 'services/platform_file_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   // 桌面端(Windows/Linux/macOS)sqflite初始化：sqflite默认仅支持Android/iOS，桌面端需用FFI
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+  // 启动时从系统读取真实版本号（修复硬编码导致检测更新永远提示有更新的问题）
+  await UpdateService.initVersion();
+  // 启动时迁移旧备份目录「个人记账备份」→「简帐备份」
+  await PlatformFileService.migrateOldBackupDir();
   // 全局兜底：任何未预料到的界面绘制异常，都用友好提示替代 release 版默认的灰色错误块，
   // 且只替换出错区域，不连累外层主框架与底部导航，避免整屏变灰、无法操作。
   ErrorWidget.builder = (FlutterErrorDetails details) {
@@ -51,8 +60,19 @@ class MyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = ref.watch(darkModeProvider);
     return MaterialApp(
-      title: '个人记账',
+      title: '简帐',
       debugShowCheckedModeBanner: false,
+      // 强制中文本地化：让日期选择器等系统内置组件的月份/星期/按钮显示中文
+      locale: const Locale('zh', 'CN'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+        Locale('en', 'US'),
+      ],
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
@@ -127,7 +147,7 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
               const SizedBox(height: 24),
               const Text(
-                '个人记账',
+                '简帐',
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
@@ -174,6 +194,92 @@ class _MainShellState extends State<MainShell> {
     TaxCenterPage(),
     StatsPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // 启动后延迟2秒自动检测更新（避免影响启动速度）
+    Future.delayed(const Duration(seconds: 2), _checkUpdateOnLaunch);
+  }
+
+  /// 启动时自动检测更新
+  Future<void> _checkUpdateOnLaunch() async {
+    if (!mounted) return;
+    try {
+      final result = await UpdateService.checkUpdate();
+      if (!mounted) return;
+      if (result.hasUpdate && result.latestVersion != null) {
+        _showUpdateDialog(result.latestVersion!);
+      }
+    } catch (_) {
+      // 检测失败静默处理，不打扰用户
+    }
+  }
+
+  /// 显示更新弹窗
+  void _showUpdateDialog(AppVersion latest) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.system_update, color: AppTheme.primaryGold),
+            SizedBox(width: 8),
+            Text('发现新版本'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('当前版本：${UpdateService.currentVersionName}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            Text('最新版本：${latest.versionName}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.primaryGold)),
+            const SizedBox(height: 12),
+            const Text('更新内容：', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                latest.releaseNotes.isEmpty ? '优化体验，修复已知问题' : latest.releaseNotes,
+                style: const TextStyle(fontSize: 12, height: 1.5),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('⚠️ 建议更新前先导出备份，防止数据丢失。', style: TextStyle(fontSize: 11, color: Colors.orange)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('稍后更新'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              // 打开下载链接
+              if (await canLaunchUrl(Uri.parse(latest.downloadUrl))) {
+                await launchUrl(Uri.parse(latest.downloadUrl), mode: LaunchMode.externalApplication);
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('请手动访问：${latest.downloadUrl}')),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.download),
+            label: const Text('立即更新'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGold),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _onAdd() {
     showModalBottomSheet(

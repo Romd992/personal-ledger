@@ -1,9 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/income.dart';
 import '../services/database_service.dart';
+import '../services/image_compress_service.dart';
+import '../services/platform_file_service.dart';
 import '../providers/data_providers.dart';
 import '../providers/settings_providers.dart';
 import '../services/auto_backup_service.dart';
@@ -41,6 +45,7 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
   bool _showSuggestions = false;
   bool _suppressSuggest = false; // 选中联想项时临时抑制，避免赋值触发listener又弹出列表
   bool _isSaving = false; // 防止重复保存
+  List<String> _voucherImages = []; // 凭证图片路径列表
 
   // 计算结果
   double _taxAmount = 0;
@@ -57,15 +62,16 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
     _productController = TextEditingController(text: widget.existingIncome?.productName ?? '');
     _quantityController = TextEditingController(text: widget.existingIncome?.quantity?.toString() ?? '');
     _unitPriceController = TextEditingController(text: widget.existingIncome?.unitPrice?.toString() ?? '');
-    _amountController = TextEditingController(text: widget.existingIncome?.amount.toString() ?? '');
-    // 成本不再预填黑色实体0，新增时留空、用灰色hint提示；编辑时仅在成本>0时回显
-    _costController = TextEditingController(text: (widget.existingIncome != null && widget.existingIncome!.cost > 0) ? widget.existingIncome!.cost.toString() : '');
+    _amountController = TextEditingController(text: widget.existingIncome != null ? widget.existingIncome!.amount.toStringAsFixed(2) : '');
+    // 成本不再预填黑色实体0，新增时留空、用灰色hint提示；编辑时仅在成本>0时回显（统一两位小数）
+    _costController = TextEditingController(text: (widget.existingIncome != null && widget.existingIncome!.cost > 0) ? widget.existingIncome!.cost.toStringAsFixed(2) : '');
     _paymentDateController = TextEditingController(text: widget.existingIncome?.paymentDate ?? today);
     _remarkController = TextEditingController(text: widget.existingIncome?.remark ?? '');
     if (widget.existingIncome != null) {
       _invoiceType = widget.existingIncome!.invoiceType;
       _taxRate = widget.existingIncome!.taxRate;
       _paymentStatus = widget.existingIncome!.paymentStatus;
+      _voucherImages = List<String>.from(widget.existingIncome!.voucherImages ?? []);
     }
     _calculate();
     _customerController.addListener(_onCustomerChanged);
@@ -146,6 +152,145 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: AppTheme.expenseRed, duration: const Duration(seconds: 2)));
   }
 
+  /// 构建凭证图片区域
+  Widget _buildVoucherImages() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_voucherImages.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ..._voucherImages.asMap().entries.map((entry) {
+                final index = entry.key;
+                final path = entry.value;
+                return Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        File(path),
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => _voucherImages.removeAt(index));
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: const BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.close, size: 14, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ],
+          ),
+        const SizedBox(height: 8),
+        if (PlatformFileService.isWindows)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _pickVoucherImageWindows(),
+              icon: const Icon(Icons.file_upload, size: 18),
+              label: const Text('选择凭证图片文件'),
+              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primaryGold, side: const BorderSide(color: AppTheme.primaryGold)),
+            ),
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _pickVoucherImage(ImageSource.camera),
+                  icon: const Icon(Icons.camera_alt, size: 18),
+                  label: const Text('拍照'),
+                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primaryGold, side: const BorderSide(color: AppTheme.primaryGold)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _pickVoucherImage(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library, size: 18),
+                  label: const Text('从相册选择'),
+                  style: OutlinedButton.styleFrom(foregroundColor: AppTheme.primaryGold, side: const BorderSide(color: AppTheme.primaryGold)),
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// Windows平台：从文件选择器选择凭证图片
+  Future<void> _pickVoucherImageWindows() async {
+    try {
+      final file = await PlatformFileService.pickImage(dialogTitle: '选择凭证图片');
+      if (file == null) return;
+
+      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+      final compressedPath = await ImageCompressService.compressImage(file.path);
+
+      if (mounted) {
+        Navigator.pop(context);
+        setState(() => _voucherImages.add(compressedPath));
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('添加图片失败：$e')),
+        );
+      }
+    }
+  }
+
+  /// 选择凭证图片（拍照或相册）- Android/iOS
+  Future<void> _pickVoucherImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+      if (image == null) return;
+
+      // 显示加载
+      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+      // 压缩图片
+      final compressedPath = await ImageCompressService.compressImage(image.path);
+
+      if (mounted) {
+        Navigator.pop(context); // 关闭加载
+        setState(() => _voucherImages.add(compressedPath));
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('添加图片失败：$e')),
+        );
+      }
+    }
+  }
+
   Future<void> _save() async {
     if (_isSaving) return; // 防止重复点击
     // 先收起键盘
@@ -190,6 +335,7 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
       paymentDate: _paymentStatus == 'paid' ? _paymentDateController.text : null,
       remark: _remarkController.text.trim().isEmpty ? null : _remarkController.text.trim(),
       bookId: widget.existingIncome?.bookId ?? ref.read(currentBookIdProvider),
+      voucherImages: _voucherImages.isEmpty ? null : List<String>.from(_voucherImages),
       createdAt: widget.existingIncome?.createdAt ?? now,
       updatedAt: now,
     );
@@ -434,6 +580,10 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
             // 备注
             _buildLabel('备注（选填）'),
             TextFormField(controller: _remarkController, maxLines: 3, decoration: const InputDecoration(hintText: '其他备注信息')),
+            const SizedBox(height: 16),
+            // 凭证图片
+            _buildLabel('凭证图片（选填，可多张）'),
+            _buildVoucherImages(),
             const SizedBox(height: 24),
             SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _isSaving ? null : _save, child: Text(_isSaving ? '保存中...' : (widget.existingIncome == null ? '保存收入记录' : '更新收入记录'), style: const TextStyle(fontSize: 16)))),
             const SizedBox(height: 12),
@@ -500,8 +650,8 @@ class _IncomeFormPageState extends ConsumerState<IncomeFormPage> {
       if (content['productName'] != null) _productController.text = content['productName'];
       if (content['quantity'] != null) _quantityController.text = content['quantity'].toString();
       if (content['unitPrice'] != null) _unitPriceController.text = content['unitPrice'].toString();
-      if (content['amount'] != null) _amountController.text = content['amount'].toString();
-      if (content['cost'] != null) _costController.text = content['cost'].toString();
+      if (content['amount'] != null) _amountController.text = (content['amount'] as num).toDouble().toStringAsFixed(2);
+      if (content['cost'] != null) _costController.text = (content['cost'] as num).toDouble().toStringAsFixed(2);
       if (content['invoiceType'] != null) _invoiceType = content['invoiceType'];
       if (content['taxRate'] != null) _taxRate = content['taxRate'];
       if (content['paymentStatus'] != null) _paymentStatus = content['paymentStatus'];

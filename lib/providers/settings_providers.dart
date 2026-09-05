@@ -111,6 +111,28 @@ class BackupLimitNotifier extends StateNotifier<int> {
   }
 }
 
+// 自动备份频率（天数：0=每次记账后，1=每天，3=每3天，7=每周，30=每月，-1=关闭）
+final backupFrequencyProvider = StateNotifierProvider<BackupFrequencyNotifier, int>((ref) {
+  return BackupFrequencyNotifier();
+});
+
+class BackupFrequencyNotifier extends StateNotifier<int> {
+  BackupFrequencyNotifier() : super(0) {
+    _loadFrequency();
+  }
+
+  Future<void> _loadFrequency() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = prefs.getInt('backup_frequency_days') ?? 0;
+  }
+
+  Future<void> setFrequency(int days) async {
+    state = days;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('backup_frequency_days', days);
+  }
+}
+
 // 金额隐私遮罩
 final amountPrivacyProvider = StateNotifierProvider<AmountPrivacyNotifier, bool>((ref) {
   return AmountPrivacyNotifier();

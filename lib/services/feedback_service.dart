@@ -26,7 +26,7 @@ class FeedbackService {
           '${now.second.toString().padLeft(2, '0')}';
 
       final markdownContent = StringBuffer();
-      markdownContent.writeln('## 📝 个人记账App反馈');
+      markdownContent.writeln('## 📝 简帐App反馈');
       markdownContent.writeln('');
       markdownContent.writeln('**反馈内容：**');
       markdownContent.writeln('> $content');
@@ -45,15 +45,18 @@ class FeedbackService {
         },
       });
 
-      final response = await http.post(
-        Uri.parse(_webhookUrl),
-        headers: {'Content-Type': 'application/json; charset=utf-8'},
-        body: body,
-      );
+      final response = await http
+          .post(
+            Uri.parse(_webhookUrl),
+            headers: {'Content-Type': 'application/json; charset=utf-8'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
         final errcode = result['errcode'] ?? -1;
+        // errcode==0 才是真正送达；93000 等表示机器人失效/通道异常
         return errcode == 0;
       }
       return false;

@@ -16,6 +16,7 @@ class Income {
   final String? paymentDate; // 收款日期
   final String? remark;
   final int bookId; // 所属账本ID
+  final List<String>? voucherImages; // 凭证图片路径列表
   final String createdAt;
   final String updatedAt;
 
@@ -37,6 +38,7 @@ class Income {
     this.paymentDate,
     this.remark,
     this.bookId = 1,
+    this.voucherImages,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -86,6 +88,7 @@ class Income {
       'payment_date': paymentDate,
       'remark': remark,
       'book_id': bookId,
+      'voucher_images': voucherImages != null ? voucherImages!.join('|') : null,
       'created_at': createdAt,
       'updated_at': updatedAt,
     };
@@ -110,6 +113,9 @@ class Income {
       paymentDate: map['payment_date'] as String?,
       remark: map['remark'] as String?,
       bookId: (map['book_id'] as num?)?.toInt() ?? 1,
+      voucherImages: map['voucher_images'] != null && (map['voucher_images'] as String).isNotEmpty
+          ? (map['voucher_images'] as String).split('|')
+          : null,
       createdAt: map['created_at'] as String,
       updatedAt: map['updated_at'] as String,
     );
@@ -133,6 +139,7 @@ class Income {
     String? paymentDate,
     String? remark,
     int? bookId,
+    List<String>? voucherImages,
     String? createdAt,
     String? updatedAt,
   }) {
@@ -154,6 +161,7 @@ class Income {
       paymentDate: paymentDate ?? this.paymentDate,
       remark: remark ?? this.remark,
       bookId: bookId ?? this.bookId,
+      voucherImages: voucherImages ?? this.voucherImages,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

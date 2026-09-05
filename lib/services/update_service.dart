@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:package_info_plus/package_info_plus.dart';
 
 /// 版本信息
 class AppVersion {
@@ -52,9 +53,20 @@ class UpdateService {
   static const String _versionUrl =
       'https://personal-ledger-v2.surge.sh/version.json';
 
-  // 当前应用版本（与pubspec.yaml保持一致）
-  static const String currentVersionName = '2.1.7';
-  static const int currentVersionCode = 13;
+  // 当前应用版本（启动时由 initVersion() 从系统读取，不再硬编码）
+  static String currentVersionName = '1.0.0';
+  static int currentVersionCode = 1;
+
+  /// 启动时调用：从系统读取真实版本号，避免硬编码与实际安装版本不一致
+  static Future<void> initVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      currentVersionName = info.version;
+      currentVersionCode = int.tryParse(info.buildNumber) ?? 1;
+    } catch (_) {
+      // 读取失败保留默认值
+    }
+  }
 
   /// 检测更新
   static Future<UpdateCheckResult> checkUpdate() async {

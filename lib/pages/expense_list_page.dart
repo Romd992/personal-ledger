@@ -20,6 +20,8 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
   String _paymentFilter = 'all';
   int? _expenseTypeFilter; // 支出类型筛选
   String? _expenseTypeFilterName;
+  DateTime? _dateFilterStart;
+  DateTime? _dateFilterEnd;
 
   @override
   void dispose() {
@@ -36,7 +38,28 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
       appBar: AppBar(
         title: const Text('支出明细'),
         backgroundColor: AppTheme.expenseRed,
-        // 移除右上角筛选按钮，筛选移到列表顶部
+        actions: [
+          IconButton(
+            icon: Icon(
+              Icons.date_range,
+              color: (_dateFilterStart != null || _dateFilterEnd != null) ? Colors.white : null,
+            ),
+            tooltip: '按日期筛选',
+            onPressed: _showDateRangePicker,
+          ),
+          if (_dateFilterStart != null || _dateFilterEnd != null)
+            IconButton(
+              icon: const Icon(Icons.clear),
+              tooltip: '清除日期筛选',
+              onPressed: () {
+                setState(() {
+                  _dateFilterStart = null;
+                  _dateFilterEnd = null;
+                });
+                _applyFilter();
+              },
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -147,7 +170,43 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
       paymentStatus: _paymentFilter == 'all' ? null : _paymentFilter,
       expenseTypeId: _expenseTypeFilter,
       keyword: _searchController.text.trim().isEmpty ? null : _searchController.text.trim(),
+      startDate: _dateFilterStart != null
+          ? '${_dateFilterStart!.year}-${_dateFilterStart!.month.toString().padLeft(2,'0')}-${_dateFilterStart!.day.toString().padLeft(2,'0')}'
+          : null,
+      endDate: _dateFilterEnd != null
+          ? '${_dateFilterEnd!.year}-${_dateFilterEnd!.month.toString().padLeft(2,'0')}-${_dateFilterEnd!.day.toString().padLeft(2,'0')}'
+          : null,
     );
+  }
+
+  /// 显示日期范围选择器
+  void _showDateRangePicker() async {
+    final now = DateTime.now();
+    final result = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2300),
+      initialDateRange: (_dateFilterStart != null && _dateFilterEnd != null)
+          ? DateTimeRange(start: _dateFilterStart!, end: _dateFilterEnd!)
+          : DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+      helpText: '选择日期范围',
+      fieldStartHintText: '开始日期',
+      fieldEndHintText: '结束日期',
+    );
+
+    if (result != null) {
+      setState(() {
+        _dateFilterStart = result.start;
+        _dateFilterEnd = result.end;
+      });
+      _applyFilter();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已筛选：${result.start.year}年${result.start.month}月${result.start.day}日 至 ${result.end.year}年${result.end.month}月${result.end.day}日'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _showTypeFilter() {
